@@ -1,6 +1,10 @@
 # If you run this outside of vagrant. Run these commands first.
-#   puppet module install puppetlabs-stdlib
-#   puppet module install puppetlabs-inifile
+# You must also ensure that the machine is resolvable by it's fully qualified name.
+#
+# puppet module install puppetlabs-stdlib
+# puppet module install puppetlabs-inifile
+# puppet module install puppetlabs-motd
+# puppet module install saz-ssh
 
 
 $packages = [
@@ -13,9 +17,11 @@ $packages = [
   'haveged'
 ]
 
+$sasl_port = 9095
+
 $listeners = [
   'PLAINTEXT://:9092',
-  'SASL_PLAINTEXT://:9095'
+  "SASL_PLAINTEXT://:${sasl_port}"
 ]
 $kerberos_realm = upcase($::domain)
 $kerberos_master_password = 'password123'
@@ -235,7 +241,7 @@ property_setting{'sasl.kerberos.service.name':
 property_setting{'zookeeper.set.acl':
   ensure  => present,
   path    => '/etc/kafka/server.properties',
-  value   => 'kafka'
+  value   => true
 } ->
 file{$log_dir:
   ensure => directory
@@ -264,7 +270,7 @@ export KAFKA_HEAP_OPTS='-Xmx256M -Djava.security.auth.login.config=/etc/kafka/ka
 file{'/etc/kafka/consumer_sasl.properties':
   ensure  => present,
   content => "#Managed by puppet. Save changes to a different file.
-bootstrap.servers=${::fqdn}:9095
+bootstrap.servers=${::fqdn}:${sasl_port}
 group.id=test-consumer-group
 security.protocol=SASL_PLAINTEXT
 sasl.kerberos.service.name=kafka
@@ -274,30 +280,43 @@ sasl.kerberos.service.name=kafka
 file{'/etc/kafka/producer_sasl.properties':
   ensure  => present,
   content => "#Managed by puppet. Save changes to a different file.
-bootstrap.servers=${::fqdn}:9095
+bootstrap.servers=${::fqdn}:${sasl_port}
 security.protocol=SASL_PLAINTEXT
 sasl.kerberos.service.name=kafka
 "
 } ->
-notify{'info':
-  message => "Kerberos has been configured on this hosts.
-All of the keytabs are located in /etc/security/keytabs. They are currently marked as world readable. DO NOT DO THIS IN
+class{'::motd':
+  content => "Kerberos has been configured on this hosts.
+All of the keytabs are located in /etc/security/keytabs. They are currently marked as world readable (0644). DO NOT DO THIS IN
 PRODUCTION.
 
 kafka_client_jaas.conf is a client jaas configuration file. producer_sasl.properties and consumer_sasl.properties are
 configured for kerberos. Please refer to http://docs.confluent.io/2.0.0/kafka/sasl.html#configuring-kafka-clients
 
+Console Producer:
+export KAFKA_HEAP_OPTS='-Xmx512M -Djava.security.auth.login.config=/etc/kafka/kafka_client_jaas.conf'
+
+echo \"Hello world\" | kafka-console-producer --producer.config /etc/kafka/producer_sasl.properties --broker-list '${::fqdn}:${sasl_port}' --topic foo
+
+Console Consumer:
+kafka-console-consumer --consumer.config /etc/kafka/consumer_sasl.properties --new-consumer --bootstrap-server '${::fqdn}:${sasl_port}' --topic foo --from-beginning
+
 RUN
 sudo /usr/sbin/start-kerberos-kafka
-
 to start zookeeper and kafka with kerberos.
-",
-  withpath => false
+"
+} ->
+class{'ssh':
+  storeconfigs_enabled => false,
+  server_options => {
+    'PrintMotd'            => 'yes',
+    'PermitRootLogin'      => 'yes',
+    'UseDNS'               => 'no',
+    'UsePAM'               => 'yes',
+    'X11Forwarding'        => 'yes',
+    'GSSAPIAuthentication' => 'no'
+  }
 }
-
-
-
-
 
 Exec {
   path    => [

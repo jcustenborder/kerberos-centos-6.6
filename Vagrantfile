@@ -73,6 +73,9 @@ Vagrant.configure(2) do |config|
   config.vm.provision "shell", inline: <<-SHELL
 puppet module install puppetlabs-stdlib
 puppet module install puppetlabs-inifile
+puppet module install puppetlabs-motd
+puppet module install saz-ssh
 puppet apply /vagrant/manifests/default.pp
+cat /etc/motd
   SHELL
 end
