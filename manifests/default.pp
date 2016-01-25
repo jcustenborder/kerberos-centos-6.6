@@ -217,11 +217,6 @@ property_setting{'zookeeper.connect':
   path    => '/etc/kafka/server.properties',
   value   => "${::fqdn}:2181"
 } ->
-property_setting{'host.name':
-  ensure  => present,
-  path    => '/etc/kafka/server.properties',
-  value   => $::fqdn
-} ->
 property_setting{'listeners':
   ensure  => present,
   path    => '/etc/kafka/server.properties',
@@ -233,6 +228,11 @@ property_setting{'log.dirs':
   value   => $log_dir
 } ->
 property_setting{'sasl.kerberos.service.name':
+  ensure  => present,
+  path    => '/etc/kafka/server.properties',
+  value   => 'kafka'
+} ->
+property_setting{'zookeeper.set.acl':
   ensure  => present,
   path    => '/etc/kafka/server.properties',
   value   => 'kafka'
@@ -264,23 +264,19 @@ export KAFKA_HEAP_OPTS='-Xmx256M -Djava.security.auth.login.config=/etc/kafka/ka
 file{'/etc/kafka/consumer_sasl.properties':
   ensure  => present,
   content => "#Managed by puppet. Save changes to a different file.
-zookeeper.connect=${::fqdn}:2181
-zookeeper.connection.timeout.ms=6000
+bootstrap.servers=${::fqdn}:9095
 group.id=test-consumer-group
 security.protocol=SASL_PLAINTEXT
-sasl.kerberos.service.name=\"kafka\"
+sasl.kerberos.service.name=kafka
 "
 } ->
 
 file{'/etc/kafka/producer_sasl.properties':
   ensure  => present,
   content => "#Managed by puppet. Save changes to a different file.
-metadata.broker.list=${::fqdn}:9095
-producer.type=sync
-compression.codec=none
-serializer.class=kafka.serializer.DefaultEncoder
+bootstrap.servers=${::fqdn}:9095
 security.protocol=SASL_PLAINTEXT
-sasl.kerberos.service.name=\"kafka\"
+sasl.kerberos.service.name=kafka
 "
 } ->
 notify{'info':
@@ -310,4 +306,3 @@ Exec {
     '/bin'
   ]
 }
-
