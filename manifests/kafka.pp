@@ -12,9 +12,7 @@ $packages = [
   'confluent-schema-registry',
   'java-1.8.0-openjdk-headless',
   'krb5-workstation',
-  'krb5-server',
   'krb5-libs',
-  'haveged'
 ]
 
 $sasl_port = 9095
@@ -26,12 +24,18 @@ $listeners = [
 $kerberos_realm = upcase($::domain)
 $kerberos_master_password = 'password123'
 
+$keytab_root = '/etc/security/keytabs'
+
 $zookeeper_principal = "zookeeper/${fqdn}@${kerberos_realm}"
-$zookeeper_keytab = '/etc/security/keytabs/zookeeper.keytab'
+$zookeeper_keytab = "${keytab_root}/zookeeper.keytab"
 $kafka_principal = "kafka/${fqdn}@${kerberos_realm}"
-$kafka_keytab = '/etc/security/keytabs/kafka.keytab'
+$kafka_keytab = "${keytab_root}/kafka.keytab"
 $kafkaclient_principal = "kafkaclient/${fqdn}@${kerberos_realm}"
-$kafkaclient_keytab = '/etc/security/keytabs/kafkaclient.keytab'
+$kafkaclient_keytab = "${keytab_root}/kafkaclient.keytab"
+
+$kafkaclient_keytab_source = "file:///vagrant/keytabs/kafkaclient.keytab"
+$kafka_keytab_source       = "file:///vagrant/keytabs/kafka.keytab"
+$zookeeper_keytab_source   = "file:///vagrant/keytabs/zookeeper.keytab"
 
 $log_dir='/var/lib/kafka'
 
@@ -48,14 +52,13 @@ define property_setting(
   }
 }
 
-
 package{'epel-release':
   ensure => 'installed'
 } ->
-service{'firewall':
+service{'iptables':
   ensure => 'stopped',
   enable => false
-}
+} ->
 yumrepo{'confluent':
   ensure   => 'present',
   descr    => 'Confluent repository for 2.0.x packages',
@@ -66,9 +69,23 @@ yumrepo{'confluent':
 package{$packages:
   ensure => 'installed'
 } ->
-service{'haveged':
-  ensure => 'running',
-  enable => true
+file{$keytab_root:
+  ensure => directory,
+} ->
+file { $kafka_keytab:
+  ensure  => present,
+  source  => $kafka_keytab_source,
+  mode    => '0644',  #Never do this in production
+} ->
+file { $zookeeper_keytab:
+  ensure  => present,
+  source  => $zookeeper_keytab_source,
+  mode    => '0644',  #Never do this in production
+} ->
+file { $kafkaclient_keytab:
+  ensure  => present,
+  source  => $kafkaclient_keytab_source,
+  mode    => '0644',  #Never do this in production
 } ->
 file{'/etc/krb5.conf':
   ensure  => 'present',
@@ -85,8 +102,8 @@ file{'/etc/krb5.conf':
 
 [realms]
     ${kerberos_realm} = {
-        kdc = ${::fqdn}:88
-        admin_server = ${::fqdn}:749
+        kdc = kdc.example.com:88
+        admin_server = kdc.example.com:749
         default_domain = ${::domain}
     }
 
@@ -99,82 +116,6 @@ file{'/etc/krb5.conf':
     admin_server = FILE:/var/log/kadmin.log
     default = FILE:/var/log/krb5lib.log
 "
-} ->
-file{'/var/kerberos/krb5kdc/kdc.conf':
-  ensure  => 'present',
-  content => "default_realm = ${kerberos_realm}
-
-[kdcdefaults]
-    v4_mode = nopreauth
-    kdc_ports = 0
-
-[realms]
-    ${kerberos_realm} = {
-        kdc_ports = 88
-        admin_keytab = /etc/kadm5.keytab
-        database_name = /var/kerberos/krb5kdc/principal
-        acl_file = /var/kerberos/krb5kdc/kadm5.acl
-        key_stash_file = /var/kerberos/krb5kdc/stash
-        max_life = 10h 0m 0s
-        max_renewable_life = 7d 0h 0m 0s
-        master_key_type = des3-hmac-sha1
-        supported_enctypes = arcfour-hmac:normal des3-hmac-sha1:normal des-cbc-crc:normal des:normal des:v4 des:norealm des:onlyrealm des:afs3
-        default_principal_flags = +preauth
-    }
-"
-} ->
-file{'/var/kerberos/krb5kdc/kadm5.acl':
-  ensure  => 'present',
-  content => "*/admin@${kerberos_realm}      *
-"
-} ->
-exec{'kdb5_util create':
-  command => "printf '${kerberos_master_password}\n${kerberos_master_password}\n'|   kdb5_util create -r ${kerberos_realm} -s",
-  creates => '/var/kerberos/krb5kdc/principal',
-  path    => [
-    '/usr/sbin',
-    '/usr/bin'
-  ]
-} ->
-file{'/etc/security/keytabs':
-  ensure => directory,
-} ->
-exec{'add kafka principal':
-  command => "kadmin.local -q 'addprinc -randkey ${kafka_principal}'",
-  unless  => "kadmin.local -q 'listprincs ${kafka_principal}' | grep '${kafka_principal}'",
-} ->
-exec{'create kafka keytab':
-  command => "kadmin.local -q 'ktadd -k ${kafka_keytab} ${kafka_principal}'",
-  creates => $kafka_keytab,
-} ->
-exec{'add zookeeper principal':
-  command => "kadmin.local -q 'addprinc -randkey ${zookeeper_principal}'",
-  unless  => "kadmin.local -q 'listprincs ${zookeeper_principal}' | grep '${zookeeper_principal}'",
-} ->
-exec{'create zookeeper keytab':
-  command => "kadmin.local -q 'ktadd -k ${zookeeper_keytab} ${zookeeper_principal}'",
-  creates => $zookeeper_keytab,
-} ->
-exec{'add kafkaclient principal':
-  command => "kadmin.local -q 'addprinc -randkey ${kafkaclient_principal}'",
-  unless  => "kadmin.local -q 'listprincs ${kafkaclient_principal}' | grep '${kafkaclient_principal}'",
-} ->
-exec{'create kafkaclient keytab':
-  command => "kadmin.local -q 'ktadd -k ${kafkaclient_keytab} ${kafkaclient_principal}'",
-  creates => $kafkaclient_keytab,
-} ->
-service{'krb5kdc':
-  ensure => 'running',
-  enable => true
-} ->
-file { '/etc/security/keytabs/kafkaclient.keytab':
-  mode    => '0644',  #Never do this in production
-} ->
-file { '/etc/security/keytabs/kafka.keytab':
-  mode    => '0644',  #Never do this in production
-} ->
-file { '/etc/security/keytabs/zookeeper.keytab':
-  mode    => '0644',  #Never do this in production
 } ->
 file{'/etc/kafka/kafka_server_jaas.conf':
   ensure  => present,

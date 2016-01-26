@@ -10,10 +10,44 @@ Vagrant.configure(2) do |config|
   # For a complete reference, please see the online documentation at
   # https://docs.vagrantup.com.
 
+  BOX='puppetlabs/centos-6.6-64-puppet'
+  IP_PREFIX='10.0.3'
+  kdc_ip = "#{IP_PREFIX}.14"
+  kafka_ip = "#{IP_PREFIX}.15"
+
+  config.vm.define 'kdc' do |kdc|
+    kdc.vm.network "private_network", ip: kdc_ip
+    kdc.vm.box = 'puppetlabs/centos-6.6-64-puppet'
+    kdc.vm.hostname = 'kdc.example.com'
+    kdc.vm.provision "shell", inline: <<-SHELL
+    puppet resource host 'kdc.example.com' ensure=present ip='#{kdc_ip}'
+    puppet resource host 'kafka.example.com' ensure=present ip='#{kafka_ip}'
+    puppet module install puppetlabs-stdlib
+    puppet apply /vagrant/manifests/kdc.pp
+    cat /etc/motd
+      SHELL
+  end
+
+  config.vm.define 'kafka' do |kafka|
+    kafka.vm.network "private_network", ip: kafka_ip
+    kafka.vm.box = 'puppetlabs/centos-6.6-64-puppet'
+    kafka.vm.hostname = 'kafka.example.com'
+    kafka.vm.provision "shell", inline: <<-SHELL
+    puppet resource host 'kdc.example.com' ensure=present ip='#{kdc_ip}'
+    puppet resource host 'kafka.example.com' ensure=present ip='#{kafka_ip}'
+    puppet module install puppetlabs-stdlib
+    puppet module install puppetlabs-inifile
+    puppet module install puppetlabs-motd
+    puppet module install saz-ssh
+    puppet apply /vagrant/manifests/kafka.pp
+    cat /etc/motd
+    SHELL
+  end
+
   # Every Vagrant development environment requires a box. You can search for
   # boxes at https://atlas.hashicorp.com/search.
-  config.vm.box = "puppetlabs/centos-6.6-64-puppet"
-  config.vm.hostname = 'kafka.example.com'
+  # config.vm.box = "puppetlabs/centos-6.6-64-puppet"
+  # config.vm.hostname = 'kafka.example.com'
 
   # Disable automatic box update checking. If you disable this, then
   # boxes will only be checked for updates when the user runs
@@ -70,12 +104,12 @@ Vagrant.configure(2) do |config|
   #   sudo apt-get install -y apache2
   # SHELL
 
-  config.vm.provision "shell", inline: <<-SHELL
-puppet module install puppetlabs-stdlib
-puppet module install puppetlabs-inifile
-puppet module install puppetlabs-motd
-puppet module install saz-ssh
-puppet apply /vagrant/manifests/default.pp
-cat /etc/motd
-  SHELL
+#   config.vm.provision "shell", inline: <<-SHELL
+# puppet module install puppetlabs-stdlib
+# puppet module install puppetlabs-inifile
+# puppet module install puppetlabs-motd
+# puppet module install saz-ssh
+# puppet apply /vagrant/manifests/kafka.pp
+# cat /etc/motd
+#   SHELL
 end
